@@ -4,12 +4,14 @@ from fastapi import FastAPI, Path
 from typing import List
 from enum import Enum
 from pydantic import BaseModel
+import asyncio
+from typing import Optional
 
-class DosPorDosYear(int, Enum):
-    y2012 = 2012
-    y2013 = 2013
-    y2017 = 2017
-    y2024 = 2024
+class DosPorDosYear(str, Enum):
+    y2012 = '2012'
+    y2013 = '2013'
+    y2017 = '2017'
+    y2024 = '2024'
 
 
 
@@ -78,21 +80,23 @@ async def get_isabuhay_battles_per_emcee(year: int = Path(...,title="Isabuhay To
 @app.get("/tournaments/dos-por-dos-{year}/emcees")
 async def get_dpd_emcees(year: DosPorDosYear):
     emcee_list=[]
-
-    urlString = 'https://www.fliptop.com.ph/tournaments/dos-por-dos-' + str(DosPorDosYear[year])
+    filler = ''
+    if year == '2024':
+        filler = 'squared-'
+    urlString = 'https://www.fliptop.com.ph/tournaments/dos-por-dos-' + filler + DosPorDosYear['y'+year]
     print(urlString)
     html_text = requests.get(urlString).text
     print(html_text)
-    # soup = BeautifulSoup(html_text, 'lxml')
-    # emcees = soup.find('ul', class_='list text-small').find_all('li')
-    # for emcee in emcees:
-    #     emcee_list.append(emcee.text.strip())
-    # return {"year": year,
-    return None
+    soup = BeautifulSoup(html_text, 'lxml')
+    emcees = soup.find('ul', class_='list text-small').find_all('li')
+    for emcee in emcees:
+        emcee_list.append(emcee.text.strip())
+    return {"year": year,"emcees": emcee_list}
 
 @app.get("/emcees/{emcee_name}")
 async def get_emcee(emcee_name:str):
     urlString = 'https://www.fliptop.com.ph/emcees/' + emcee_name.lower()
+    print(urlString)
     html_text = requests.get(urlString).text
     soup = BeautifulSoup(html_text, 'lxml')
     emceeDiv = soup.find('div', class_='col-md-8')
@@ -101,7 +105,46 @@ async def get_emcee(emcee_name:str):
     return {
         "name": name,
         "hometown": details[0].text.split(':')[1],
-        "groups": details[1].text.split(':')[1],
-        "division": details[2].text.split(':')[1],
-        "year-joined": details[3].text.split(':')[1]
+        "groups": details[1].text.split(':')[1].strip(),
+        "division": details[2].text.split(':')[1].strip(),
+        "year-joined": details[3].text.split(':')[1].strip()
     }
+
+@app.get("/emcees")
+@app.get("/emcees/division/{division}")
+async def get_emcees(division: Optional[str] = 'all'):
+    print(division)
+    emcee_list = []
+    pageNum = 1
+    while True:
+        if(division != "all"):
+            urlString = 'https://www.fliptop.com.ph/emcees/division/' + division + '?page='
+        else:
+            urlString = 'https://www.fliptop.com.ph/emcees?page='
+        print(urlString)
+        html_text = requests.get(urlString + str(pageNum)).text
+        soup = BeautifulSoup(html_text, 'lxml')
+        print("html text is: "+ urlString + str(pageNum) )
+        emceesDiv = soup.find('div', class_='row mt-3 mb-5')
+        if not emceesDiv:
+            emceesDiv = soup.find('div', class_='row mt-3 mb-2')
+        
+
+        emceeDiv = emceesDiv.find_all('h4')
+        
+        if not emceeDiv:
+            break
+        
+        print(emceeDiv)
+
+        for emcee in emceeDiv:
+            name = emcee.text
+            name = name.replace(' ','-')
+            print(name)
+            emcee_details = await get_emcee(name)
+            emcee_list.append(emcee_details)
+        pageNum += 1
+    return {
+        "division": division,
+        "emcees":emcee_list
+        }
